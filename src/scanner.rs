@@ -26,34 +26,144 @@ struct Scanner {
 
 impl Scanner {
     fn run(&mut self) {
-        // TODO(you): drive the scan: read one token at a time until the source runs out, then
-        //            add the EOF token. Spec 6.1 says which line EOF carries.
-        todo!("run")
+        while !self.at_end() {
+            self.start = self.current;
+            self.scan_token();
+        }
+
+        let eof_line = if self.tokens.is_empty() {
+            1
+        } else {
+            self.tokens.last().unwrap().line
+        };
+
+        self.start = self.current;
+        self.tokens.push(Token {
+            kind: TokenType::Eof,
+            lexeme: String::new(),
+            line: eof_line,
+        });
     }
 
     fn scan_token(&mut self) {
-        // TODO(you): recognise one token. Spec 1.2 lists every token type, 1.1 covers
-        //            whitespace and comments, and an unrecognised character is 'Character is
-        //            not part of any token.' (5.1).
-        todo!("scan_token")
+        let c = self.advance();
+
+        match c {
+            '(' => self.add(TokenType::LParen),
+            ')' => self.add(TokenType::RParen),
+            '{' => self.add(TokenType::LBrace),
+            '}' => self.add(TokenType::RBrace),
+            ',' => self.add(TokenType::Comma),
+            ';' => self.add(TokenType::Semicolon),
+
+            '+' => self.add(TokenType::Plus),
+            '-' => self.add(TokenType::Minus),
+            '*' => self.add(TokenType::Star),
+            '/' => {
+                if self.matches('/') {
+                    while !self.at_end() && self.peek() != '\n' {
+                        self.advance();
+                    }
+                } else {
+                    self.add(TokenType::Slash);
+                }
+            }
+
+            '!' | '=' | '>' | '<' => {
+                let two = self.matches('=');
+
+                let token_type = match (c, two) {
+                    ('!', true) => TokenType::BangEqual,
+                    ('!', false) => TokenType::Bang,
+                    ('=', true) => TokenType::EqualEqual,
+                    ('=', false) => TokenType::Equal,
+                    ('>', true) => TokenType::GreaterEqual,
+                    ('>', false) => TokenType::Greater,
+                    ('<', true) => TokenType::LessEqual,
+                    ('<', false) => TokenType::Less,
+                    _ => unreachable!(),
+                };
+
+                self.add(token_type);
+            }
+
+            '"' => self.string(),
+
+            c if c.is_ascii_digit() => self.number(),
+
+            ' ' | '\r' | '\t' => {}
+
+            '\n' => {
+                self.line += 1;
+            }
+
+            c if c.is_ascii_alphabetic() || c == '_' => {
+                self.identifier();
+            }
+
+            _ => {
+                self.error(
+                    self.line,
+                    "Character is not part of any token.",
+                );
+            }
+        }
     }
 
     fn string(&mut self) {
-        // TODO(you): scan a string literal. A string may span lines, and an unterminated one is
-        //            reported at the line it opened on (1.5; the message is in 5.1).
-        todo!("string")
+        let start_line = self.line;
+
+        while self.peek() != '"' && !self.at_end() {
+            if self.peek() == '\n' {
+                self.line += 1;
+            }
+
+            self.advance();
+        }
+
+        if self.at_end() {
+            self.error(start_line, "String is never closed.");
+            return;
+        }
+
+        // Consume the closing quote.
+        self.advance();
+
+        self.add(TokenType::Str);
     }
 
     fn number(&mut self) {
-        // TODO(you): scan a number literal: digits, then a fractional part only when a digit
-        //            follows the dot (1.4).
-        todo!("number")
+        while self.peek().is_ascii_digit() {
+            self.advance();
+        }
+
+        // A decimal point belongs to the number only when
+        // it is followed by another digit.
+        if self.peek() == '.' && self.peek_next().is_ascii_digit() {
+            self.advance();
+
+            while self.peek().is_ascii_digit() {
+                self.advance();
+            }
+        }
+
+        self.add(TokenType::Number);
     }
 
     fn identifier(&mut self) {
-        // TODO(you): scan an identifier, then decide whether it is a keyword; keyword() in
-        //            token.rs does the lookup (1.2, 1.3).
-        todo!("identifier")
+        while self.peek().is_ascii_alphanumeric() || self.peek() == '_' {
+            self.advance();
+        }
+
+        let text: String = self.src[self.start..self.current]
+            .iter()
+            .collect();
+
+        if let Some(kind) = keyword(&text) {
+            self.add(kind);
+        } else {
+            self.add(TokenType::Identifier);
+        }
     }
 
     // --- primitives ---------------------------------------------------------------
@@ -72,6 +182,7 @@ impl Scanner {
         if self.at_end() || self.src[self.current] != expected {
             return false;
         }
+
         self.current += 1;
         true
     }
@@ -101,6 +212,7 @@ impl Scanner {
     }
 
     fn error(&mut self, line: usize, message: &str) {
-        self.errors.push(format!("[line {}] Error: {}", line, message));
+        self.errors
+            .push(format!("[line {}] Error: {}", line, message));
     }
 }
